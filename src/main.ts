@@ -109,7 +109,7 @@ const btnPlay = app.querySelector<HTMLButtonElement>('#btn-play')!;
 const btnClear = app.querySelector<HTMLButtonElement>('#btn-clear')!;
 
 let mode: DateMode = 'real';
-let appliedYear = today.year;
+let appliedYear: number | null = today.year;
 
 for (let m = 1; m <= 12; m++) {
   const opt = document.createElement('option');
@@ -360,11 +360,11 @@ async function runSolve(instant: boolean): Promise<void> {
       setStatus('请输入有效年份（1–9999）。', 'err');
       return;
     }
-    if (year !== appliedYear) {
-      appliedYear = year;
-      refillDays();
-      syncWeekdayFromDate();
-    }
+    // Always resync weekday before solving: year may match appliedYear after
+    // a clear → edit month/day → restore same year path that skipped sync.
+    appliedYear = year;
+    refillDays();
+    syncWeekdayFromDate();
   }
   const token = ++solveToken;
   animToken++;
@@ -459,14 +459,18 @@ function commitYear(force: boolean): void {
   if (!Number.isInteger(year) || year < 1 || year > 9999) return;
   // Avoid resetting on every keystroke of a multi-digit year; blur still commits.
   if (!force && raw.length < 4) return;
-  if (year === appliedYear) return;
+  const yearChanged = year !== appliedYear;
+  const prevWeekday = weekdaySel.value;
   appliedYear = year;
-  refillDays();
+  if (yearChanged) refillDays();
   syncWeekdayFromDate();
-  onDateEdited();
+  // Same year after a clear/edit can leave weekday stale — still treat as edit.
+  if (yearChanged || weekdaySel.value !== prevWeekday) onDateEdited();
 }
 
 yearInput.addEventListener('input', () => {
+  // Clearing the year invalidates appliedYear so restoring the same digits resyncs.
+  if (readYear() === null) appliedYear = null;
   commitYear(false);
 });
 
