@@ -33,3 +33,9 @@ npm run preview
 ## 演示参数
 
 打开 `/?demo=1` 会自动求解当天日期并立即铺满棋盘（便于截图）。
+
+## 在线
+
+- GitHub: https://github.com/HerbertGao/calendar-puzzle
+- Cloudflare Pages: https://calendar-puzzle-9tb.pages.dev/
+- 演示自动求解: https://calendar-puzzle-9tb.pages.dev/?demo=1
