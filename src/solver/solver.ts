@@ -1,7 +1,7 @@
 import puzzleData from '../data/pieces.json';
 import { getOrientations } from './orient.ts';
 import { DLX } from './dlx.ts';
-import type { Cell, Placement, PuzzleData, SolveResult } from './types.ts';
+import type { Cell, Placement, PuzzleData, SolveProgress, SolveResult } from './types.ts';
 
 const data = puzzleData as unknown as PuzzleData;
 
@@ -45,15 +45,45 @@ const WEEKDAY_LABELS = [
 
 export { MONTH_LABELS, DAY_LABELS, WEEKDAY_LABELS };
 
-/** Clamp day for month (non-leap Feb=28 for simplicity of calendar wood puzzle). */
+export function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/** Day count for the free combination mode. February is always 28, matching the wooden puzzle. */
 export function daysInMonth(month: number): number {
   if (month === 2) return 28;
-  if ([4, 6, 9, 11].includes(month)) return 30;
+  if (month === 4 || month === 6 || month === 9 || month === 11) return 30;
   return 31;
 }
 
-export function todayShanghai(): { month: number; day: number; weekday: number } {
-  const fmt = new Intl.DateTimeFormat('en-CA', {
+/** Real Gregorian month length. February 29 is included only in leap years. */
+export function daysInRealMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return daysInMonth(month);
+}
+
+/** Weekday of a Gregorian date. 0 = Sunday … 6 = Saturday. */
+export function weekdayOf(year: number, month: number, day: number): number {
+  const offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+  let y = year;
+  if (month < 3) y -= 1;
+  const n =
+    y +
+    Math.floor(y / 4) -
+    Math.floor(y / 100) +
+    Math.floor(y / 400) +
+    offsets[month - 1]! +
+    day;
+  return ((n % 7) + 7) % 7;
+}
+
+export function todayShanghai(): {
+  year: number;
+  month: number;
+  day: number;
+  weekday: number;
+} {
+  const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
@@ -63,10 +93,9 @@ export function todayShanghai(): { month: number; day: number; weekday: number }
   const parts = Object.fromEntries(
     fmt.formatToParts(new Date()).map((p) => [p.type, p.value]),
   );
+  const year = Number(parts.year);
   const month = Number(parts.month);
-  let day = Number(parts.day);
-  const max = daysInMonth(month);
-  if (day > max) day = max;
+  const day = Number(parts.day);
   const wdMap: Record<string, number> = {
     Sun: 0,
     Mon: 1,
@@ -76,8 +105,8 @@ export function todayShanghai(): { month: number; day: number; weekday: number }
     Fri: 5,
     Sat: 6,
   };
-  const weekday = wdMap[parts.weekday ?? 'Wed'] ?? 3;
-  return { month, day, weekday };
+  const weekday = wdMap[parts.weekday ?? ''] ?? weekdayOf(year, month, day);
+  return { year, month, day, weekday };
 }
 
 interface BuiltPlacement {
@@ -131,17 +160,10 @@ export class CalendarSolver {
   private targets: Set<string>;
   private allSolutions: Placement[][] = [];
   private cursor = -1;
-  private exhausted = false;
+  private searchExhausted = false;
   private lastElapsed = 0;
-  private batchSize: number;
 
-  constructor(
-    month: number,
-    day: number,
-    weekday: number,
-    batchSize = 20,
-  ) {
-    this.batchSize = batchSize;
+  constructor(month: number, day: number, weekday: number) {
     const mLabel = `${month}月`;
     const dLabel = `${day}日`;
     const wLabel = WEEKDAY_LABELS[weekday]!;
@@ -155,67 +177,144 @@ export class CalendarSolver {
     return this.targets;
   }
 
-  private runBatch(limit: number): void {
-    const t0 = performance.now();
-    const freeCells = buildFreeCells(this.targets);
-    if (freeCells.length !== 47) {
-      this.exhausted = true;
-      this.lastElapsed = performance.now() - t0;
-      return;
-    }
-    const { placements, numCells, numPieces } = enumeratePlacements(freeCells);
-    const dlx = new DLX(numCells + numPieces, limit);
-    for (const p of placements) {
-      const cols = [...p.cellBits, numCells + p.pieceIndex];
-      dlx.addRow(cols, { pieceId: p.pieceId, cells: p.cells });
-    }
-    const sols = dlx.solveAll();
-    this.allSolutions = sols.map((sol) =>
-      sol.map((m) => ({ pieceId: m.pieceId, cells: m.cells })),
-    );
-    this.exhausted = sols.length < limit;
-    this.lastElapsed = performance.now() - t0;
-  }
-
-  /** Find first solution (or reuse if already computed). */
-  solveFirst(): SolveResult | null {
-    if (this.allSolutions.length === 0 && !this.exhausted) {
-      this.runBatch(this.batchSize);
-    }
-    if (this.allSolutions.length === 0) return null;
-    this.cursor = 0;
-    return {
-      placements: this.allSolutions[0]!,
-      elapsedMs: this.lastElapsed,
-      solutionIndex: 0,
-      exhausted: this.exhausted && this.allSolutions.length === 1,
-    };
-  }
-
-  /** Next distinct solution in the precomputed batch. */
-  nextSolution(): SolveResult | null {
-    if (this.allSolutions.length === 0 && !this.exhausted) {
-      this.runBatch(this.batchSize);
-    }
-    if (this.cursor + 1 >= this.allSolutions.length) {
-      return null;
-    }
-    this.cursor++;
-    return {
-      placements: this.allSolutions[this.cursor]!,
-      elapsedMs: this.lastElapsed,
-      solutionIndex: this.cursor,
-      exhausted:
-        this.exhausted && this.cursor === this.allSolutions.length - 1,
-    };
-  }
-
   get solutionCount(): number {
     return this.allSolutions.length;
   }
 
   get currentIndex(): number {
     return this.cursor;
+  }
+
+  /** True when enumeration finished and every solution has been collected. */
+  get exhausted(): boolean {
+    return this.searchExhausted;
+  }
+
+  get elapsedMs(): number {
+    return this.lastElapsed;
+  }
+
+  private buildDlx(maxSolutions: number): DLX | null {
+    const freeCells = buildFreeCells(this.targets);
+    if (freeCells.length !== 47) return null;
+    const { placements, numCells, numPieces } = enumeratePlacements(freeCells);
+    const dlx = new DLX(numCells + numPieces, maxSolutions);
+    for (const p of placements) {
+      const cols = [...p.cellBits, numCells + p.pieceIndex];
+      dlx.addRow(cols, { pieceId: p.pieceId, cells: p.cells });
+    }
+    return dlx;
+  }
+
+  private resultAt(index: number): SolveResult {
+    return {
+      placements: this.allSolutions[index]!,
+      elapsedMs: this.lastElapsed,
+      solutionIndex: index,
+      exhausted: this.searchExhausted,
+    };
+  }
+
+  private progress(exhausted: boolean): SolveProgress {
+    this.searchExhausted = exhausted;
+    return {
+      found: this.allSolutions.length,
+      elapsedMs: this.lastElapsed,
+      exhausted,
+    };
+  }
+
+  /**
+   * Enumerate every solution, yielding between short slices so the page stays responsive.
+   * `onProgress` may fire many times; `exhausted` is true only on the final result.
+   */
+  async enumerate(
+    onProgress?: (progress: SolveProgress) => void,
+    isCancelled?: () => boolean,
+  ): Promise<SolveProgress> {
+    const t0 = performance.now();
+    this.allSolutions = [];
+    this.cursor = -1;
+    this.searchExhausted = false;
+    this.lastElapsed = 0;
+
+    const touch = (exhausted: boolean): SolveProgress => {
+      this.lastElapsed = performance.now() - t0;
+      return this.progress(exhausted);
+    };
+
+    const dlx = this.buildDlx(Number.POSITIVE_INFINITY);
+    if (!dlx) {
+      const done = touch(true);
+      onProgress?.(done);
+      return done;
+    }
+
+    let reportedFirst = false;
+    const result = await dlx.solveAllAsync({
+      yieldEveryMs: 16,
+      isCancelled,
+      onSolution: (sol) => {
+        this.allSolutions.push(
+          sol.map((m) => ({ pieceId: m.pieceId, cells: m.cells })),
+        );
+        if (!reportedFirst) {
+          reportedFirst = true;
+          this.lastElapsed = performance.now() - t0;
+          onProgress?.(this.progress(false));
+        }
+      },
+      onSlice: () => {
+        this.lastElapsed = performance.now() - t0;
+        onProgress?.(this.progress(false));
+      },
+    });
+
+    if (result.cancelled) return touch(false);
+    const done = touch(true);
+    onProgress?.(done);
+    return done;
+  }
+
+  /** Synchronous search, capped at `limit` (default: a single solution). */
+  solveFirst(limit = 1): SolveResult | null {
+    const t0 = performance.now();
+    this.allSolutions = [];
+    this.cursor = -1;
+    this.searchExhausted = false;
+    const dlx = this.buildDlx(limit);
+    if (!dlx) {
+      this.searchExhausted = true;
+      this.lastElapsed = performance.now() - t0;
+      return null;
+    }
+    const sols = dlx.solveAll();
+    this.allSolutions = sols.map((sol) =>
+      sol.map((m) => ({ pieceId: m.pieceId, cells: m.cells })),
+    );
+    this.searchExhausted = sols.length < limit;
+    this.lastElapsed = performance.now() - t0;
+    if (this.allSolutions.length === 0) return null;
+    this.cursor = 0;
+    return this.resultAt(0);
+  }
+
+  solutionAt(index: number): SolveResult | null {
+    if (index < 0 || index >= this.allSolutions.length) return null;
+    this.cursor = index;
+    return this.resultAt(index);
+  }
+
+  nextSolution(): SolveResult | null {
+    if (this.cursor + 1 >= this.allSolutions.length) return null;
+    this.cursor++;
+    return this.resultAt(this.cursor);
+  }
+
+  prevSolution(): SolveResult | null {
+    if (this.cursor <= 0) return null;
+    this.cursor--;
+    return this.resultAt(this.cursor);
   }
 }
 
@@ -225,6 +324,6 @@ export function solveDate(
   day: number,
   weekday: number,
 ): SolveResult | null {
-  const s = new CalendarSolver(month, day, weekday, 1);
-  return s.solveFirst();
+  const s = new CalendarSolver(month, day, weekday);
+  return s.solveFirst(1);
 }

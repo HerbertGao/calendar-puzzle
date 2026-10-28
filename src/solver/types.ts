@@ -30,5 +30,12 @@ export interface SolveResult {
   placements: Placement[];
   elapsedMs: number;
   solutionIndex: number;
+  /** True when the search has finished and no further solutions exist. */
+  exhausted: boolean;
+}
+
+export interface SolveProgress {
+  found: number;
+  elapsedMs: number;
   exhausted: boolean;
 }
