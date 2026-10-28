@@ -97,9 +97,52 @@ header.app-header p {
   margin-bottom: 0.75rem;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 0.55rem;
+  background: #1f1712;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.mode-switch button {
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 0.45rem 0.3rem;
+  font-size: 0.88rem;
+}
+
+.mode-switch button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mode-switch button.active {
+  background: var(--btn-primary);
+  color: #1a120c;
+}
+
+.mode-switch button.active:hover:not(:disabled) {
+  background: var(--btn-primary-hover);
+}
+
+.mode-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
 .field label {
   font-size: 0.82rem;
   color: var(--text-dim);
+}
+
+.field[hidden] {
+  display: none;
 }
 
 .field select {
@@ -113,9 +156,31 @@ header.app-header p {
   cursor: pointer;
 }
 
-.field select:focus {
+.field select:focus,
+.field input[type='number']:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.field select:disabled {
+  opacity: 1;
+  color: var(--wood-light);
+  cursor: not-allowed;
+  background-color: #2a2118;
+  background-image: none;
+  padding-right: 0.75rem;
+}
+
+.field input[type='number'] {
+  width: 100%;
+  background: var(--cell);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  font-size: 1rem;
+  font-family: inherit;
+  color-scheme: dark;
 }
 
 .btn-row {
