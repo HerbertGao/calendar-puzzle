@@ -167,6 +167,8 @@ header.app-header p {
   color: var(--wood-light);
   cursor: not-allowed;
   background-color: #2a2118;
+  background-image: none;
+  padding-right: 0.75rem;
 }
 
 .field input[type='number'] {
